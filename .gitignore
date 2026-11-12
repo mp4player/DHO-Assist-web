@@ -1,0 +1,5 @@
+node_modules/
+dist/
+public/ocr/
+/public/worldmap_0.png
+test-results/

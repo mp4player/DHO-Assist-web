@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DHO Assist · 항해 지도</title>
+</head>
+<body>
+  <div id="app">
+    <main>
+      <section class="panel map" aria-labelledby="mapTitle">
+        <div class="section-title">
+          <h1 id="mapTitle">DHO Assist 항해 지도</h1>
+          <div class="toolbar map-controls" role="group" aria-label="지도 배율">
+            <button id="mapZoomOut" type="button" aria-label="지도 축소">−</button>
+            <output id="mapZoomLevel" aria-label="현재 지도 배율">100%</output>
+            <button id="mapZoomIn" type="button" aria-label="지도 확대">+</button>
+            <button id="mapReset" type="button">지도 초기화</button>
+          </div>
+        </div>
+        <div class="map-viewport">
+          <canvas id="map" width="1200" height="600" tabindex="0" aria-label="좌표와 방향선 지도" aria-describedby="mapHint"></canvas>
+          <dl class="map-readouts" aria-label="항해 정보">
+            <div><dt>속도 <span>좌표/초</span></dt><dd id="speed">—</dd></div>
+            <div><dt>시점 방위</dt><dd id="heading">—°</dd></div>
+            <div><dt>실제 항로 방위</dt><dd id="course">—°</dd></div>
+          </dl>
+          <button id="openSettings" class="settings-button" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">설정</button>
+        </div>
+        <p id="mapHint" class="hint">드래그하거나 방향키로 이동합니다. 마우스 휠 또는 +/− 버튼으로 확대·축소합니다.</p>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <div class="dialog-heading">
+      <h2 id="settingsTitle">설정</h2>
+      <form method="dialog">
+        <button id="closeSettings" type="submit" autofocus>닫기</button>
+      </form>
+    </div>
+    <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="설정 항목">
+      <button id="recognitionTab" type="button" role="tab" aria-selected="true" aria-controls="recognitionPanel">인식 상태</button>
+      <button id="captureTab" type="button" role="tab" aria-selected="false" aria-controls="capturePanel" tabindex="-1">화면 및 영역</button>
+    </div>
+    <div id="settingsBody" class="dialog-body">
+      <form id="recognitionPanel" class="settings-overview" role="tabpanel" aria-labelledby="recognitionTab">
+        <section aria-labelledby="recognitionTitle">
+          <div class="section-title">
+            <h3 id="recognitionTitle">인식 상태</h3>
+            <span id="state">대기</span>
+          </div>
+          <div class="readouts">
+            <div><small>좌표 X / Y</small><strong id="position">— / —</strong></div>
+            <div><small>시점 방위</small><strong id="previewHeading">—°</strong></div>
+          </div>
+          <div class="toolbar">
+            <button id="once" class="primary" type="button">한 번 인식</button>
+            <button id="track" type="button">연속 인식 시작</button>
+          </div>
+          <p id="message" role="status">공유 창의 ‘창’ 탭에서 대항해시대 온라인을 선택하고, 게임에서 측량을 켜세요.</p>
+          <div class="raw">좌표 인식 · <span id="raw">—</span></div>
+          <div id="recognitionShareControls" class="screen-connection" role="group" aria-label="화면 연결" data-share-controls></div>
+        </section>
+        <section aria-labelledby="calibrationTitle">
+          <h3 id="calibrationTitle">인식 보정</h3>
+          <div class="settings">
+            <label>좌표 OCR 전처리
+              <select id="preprocess">
+                <option value="auto">자동 (게임 측량)</option>
+                <option value="none">원본 (확대)</option>
+                <option value="light">밝은 글자 → 검은 글자</option>
+                <option value="dark">어두운 글자 → 검은 글자</option>
+              </select>
+            </label>
+            <label>OCR 최소 신뢰도<input id="confidence" type="number" required step="any" value="45" min="0" max="100"></label>
+            <label>나침반 각도 보정 (°)<input id="offset" type="number" required step="any" value="0" min="-360" max="360"></label>
+            <label>방향선 길이 (지도 단위)<input id="lineLength" type="number" required step="any" value="1200" min="0" max="16384"></label>
+          </div>
+        </section>
+        <section aria-labelledby="mapSettingsTitle">
+          <h3 id="mapSettingsTitle">지도 설정</h3>
+          <div class="toolbar"><label class="button">지도 이미지 열기<input id="mapFile" type="file" accept="image/*" hidden></label></div>
+          <p id="mapFileName" class="hint">기본 지도</p>
+          <div class="settings">
+            <label>세계 좌표 너비<input id="worldWidth" type="number" required step="any" value="16384" min="1" max="1000000"></label>
+            <label>세계 좌표 높이<input id="worldHeight" type="number" required step="any" value="8192" min="1" max="1000000"></label>
+            <label>지도 원점 X<input id="originX" type="number" required step="any" value="0"></label>
+            <label>지도 원점 Y<input id="originY" type="number" required step="any" value="0"></label>
+          </div>
+          <p class="hint">지도 원점은 이미지 왼쪽 위의 게임 좌표입니다. X는 동쪽, Y는 남쪽으로 증가합니다.</p>
+        </section>
+      </form>
+      <form id="capturePanel" class="capture-panel" role="tabpanel" aria-labelledby="captureTab" hidden>
+        <div class="screen-connection" role="group" aria-label="화면 연결" data-share-controls></div>
+        <div class="toolbar">
+          <button id="demo" type="button">데모 화면</button>
+          <label class="button">스크린샷 열기<input id="image" type="file" accept="image/*" hidden></label>
+        </div>
+        <p id="screenMessage" class="hint" role="status">미리보려면 게임 화면을 공유하거나 데모 또는 스크린샷을 여세요.</p>
+        <canvas id="capture" width="960" height="540" aria-label="공유 화면과 인식 영역"></canvas>
+        <div class="toolbar">
+          <button id="autoRegions" type="button" disabled>게임 기본 영역</button>
+          <button id="coordRegion" type="button">좌표 영역 지정</button>
+          <button id="compassRegion" type="button">나침반 영역 지정</button>
+        </div>
+        <p id="selectionHint" class="hint">직접 지정하려면 영역 버튼을 누른 뒤 화면 위에서 드래그하세요.</p>
+        <div class="crops">
+          <div><small>좌표 영역</small><canvas id="coordCrop" width="320" height="80"></canvas></div>
+          <div><small>나침반 영역</small><canvas id="compassCrop" width="100" height="100"></canvas></div>
+        </div>
+      </form>
+    </div>
+    <div class="dialog-footer">
+      <div id="settingsChanges" hidden>
+        <button id="cancelSettings" type="button">변경사항 취소</button>
+        <button id="saveSettings" class="primary" type="button">변경사항 저장</button>
+      </div>
+      <button id="resetSettings" type="reset" form="recognitionPanel">설정 초기화</button>
+    </div>
+  </dialog>
+  <template id="sharingControls">
+    <div class="section-title">
+      <h4>화면 연결</h4>
+      <span data-share-status>연결 대기</span>
+    </div>
+    <div class="toolbar">
+      <button class="primary" type="button" data-share-start>게임 화면 공유</button>
+      <button type="button" data-share-stop hidden>공유 종료</button>
+    </div>
+  </template>
+  <video id="video" autoplay muted playsinline hidden></video>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

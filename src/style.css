@@ -1,0 +1,187 @@
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #dce8ee;
+  background: #0a131b;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+#app { display: flex; min-height: 100dvh; padding: 12px; }
+main { display: flex; flex: 1; min-width: 0; }
+
+.panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #283b49;
+  border-radius: 14px;
+  background: #101e29;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.section-title h3, .settings-overview h3, .dialog-heading h2 { margin: 0; font-size: 16px; }
+.section-title span { font-size: 12px; color: #a5becc; }
+#mapTitle { margin: 0; font-size: 20px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.map-controls { margin: 0; }
+.map-controls output { min-width: 5ch; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+button, .button, select, input {
+  padding: 9px 12px;
+  border: 1px solid #344d60;
+  border-radius: 7px;
+  color: inherit;
+  background: #182c3b;
+  font: inherit;
+  font-size: 13px;
+}
+
+button, .button { display: inline-block; cursor: pointer; }
+button[hidden] { display: none; }
+button:hover, .button:hover { border-color: #73d9c6; }
+button:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 2px solid #80efd0; outline-offset: 3px; }
+.primary { border-color: #80dfc4; color: #09251e; background: #80dfc4; font-weight: 700; }
+
+canvas { display: block; max-width: 100%; height: auto; }
+#capture { width: 100%; border-radius: 8px; background: #080f17; touch-action: none; }
+#capture.selecting { cursor: crosshair; }
+.crops { display: flex; gap: 18px; margin-top: 16px; align-items: flex-start; }
+.crops > div { min-width: 0; }
+.crops canvas { margin-top: 8px; border: 1px solid #354b5a; background: #070d13; }
+small { font-size: 11px; color: #a5becc; }
+.hint { color: #a5becc; font-size: 13px; line-height: 1.6; }
+#mapHint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.map-viewport { position: relative; flex: 1; min-height: 140px; }
+#map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #2a4150;
+  border-radius: 8px;
+  background: #081720;
+  cursor: grab;
+  touch-action: none;
+}
+#map.panning { cursor: grabbing; }
+
+.map-readouts {
+  position: absolute;
+  inset: 12px auto auto 12px;
+  display: flex;
+  gap: 0;
+  max-width: calc(100% - 24px);
+  margin: 0;
+  padding: 8px 0;
+  border: 1px solid #435f70;
+  border-radius: 8px;
+  background: #0a1723f2;
+  pointer-events: none;
+}
+.map-readouts > div { min-width: 0; padding: 0 12px; }
+.map-readouts > div + div { border-left: 1px solid #435f70; }
+.map-readouts dt { color: #c1d3df; font-size: 12px; }
+.map-readouts dt span { font-size: 10px; }
+.map-readouts dd {
+  margin: 3px 0 0;
+  color: #f0f5fa;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+#heading { color: #80efd0; }
+#course { color: #ffca80; }
+
+.settings-button {
+  position: absolute;
+  z-index: 1;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  min-width: 76px;
+  min-height: 42px;
+  border-color: #527484;
+  box-shadow: 0 4px 16px #0006;
+  font-weight: 700;
+}
+
+#settingsDialog {
+  width: min(1040px, calc(100% - 24px));
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 1px solid #435f70;
+  border-radius: 12px;
+  color: inherit;
+  background: #101e29;
+  box-shadow: 0 12px 48px #0008;
+}
+#settingsDialog[open] { display: flex; flex-direction: column; }
+#settingsDialog::backdrop { background: #050b13b8; }
+.dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid #2b3c4a;
+}
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 0;
+  border-bottom: 1px solid #2b3c4a;
+}
+.settings-tabs button { border-bottom-color: transparent; border-radius: 7px 7px 0 0; }
+.settings-tabs button[aria-selected="true"] { color: #80efd0; border-color: #527484; background: #101e29; }
+.dialog-body { min-height: 0; padding: 18px; overflow: auto; }
+.dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid #2b3c4a; }
+#settingsChanges:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-overview:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+.settings-overview > section { min-width: 0; padding: 14px; border: 1px solid #2b3c4a; border-radius: 8px; }
+.settings-overview > section:first-child { background: #132633; }
+.screen-connection { margin-top: 16px; padding-top: 12px; border-top: 1px solid #2b3c4a; }
+.screen-connection h4 { margin: 0; font-size: 13px; }
+.screen-connection .toolbar { margin-bottom: 0; }
+.capture-panel { max-width: 760px; margin: auto; }
+.capture-panel > .screen-connection { margin: 0; padding: 0 0 12px; border-top: 0; border-bottom: 1px solid #2b3c4a; }
+.readouts { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; border-radius: 8px; background: #0a1720; }
+.readouts strong { display: block; margin-top: 4px; font-size: 22px; font-variant-numeric: tabular-nums; }
+#message { color: #9adbcf; font-size: 13px; line-height: 1.6; }
+.raw { margin-bottom: 14px; color: #a5becc; font-size: 12px; overflow-wrap: anywhere; }
+.settings { display: grid; gap: 12px; margin-top: 12px; }
+.settings label { color: #a5becc; font-size: 12px; }
+.settings input, .settings select { display: block; width: 100%; margin-top: 6px; }
+
+@media (max-width: 760px) {
+  #app { padding: 8px; }
+  .panel { padding: 10px; }
+  .settings-overview:not([hidden]) { grid-template-columns: 1fr; }
+  .map-readouts { inset: 6px auto auto 6px; max-width: calc(100% - 12px); padding: 5px 0; }
+  .map-readouts > div { padding: 0 7px; }
+  .map-readouts dt { font-size: 11px; }
+  .map-readouts dd { font-size: 16px; }
+}
