@@ -35,6 +35,7 @@ main { display: flex; flex: 1; min-width: 0; }
 #mapTitle { margin: 0; font-size: 20px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
 .map-controls { margin: 0; }
+#mapShareMessage { margin: 0 0 8px; }
 .map-controls output { min-width: 5ch; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 
 button, .button, select, input {
@@ -163,6 +164,15 @@ small { font-size: 11px; color: #a5becc; }
 }
 .settings-overview > section { min-width: 0; padding: 14px; border: 1px solid #2b3c4a; border-radius: 8px; }
 .settings-overview > section:first-child { background: #132633; }
+.recognition-rate { grid-column: 1 / -1; }
+.measurement-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.measurement-inputs, .measurement-label { display: flex; align-items: center; gap: 12px; }
+.measurement-label { justify-content: space-between; }
+.measurement-label output { color: #80efd0; font-size: 13px; white-space: nowrap; }
+.measurement-controls input[type="number"] { width: 8ch; }
+.measurement-controls input[type="range"] { min-width: 0; padding: 0; border: 0; background: transparent; accent-color: #80efd0; }
+.measurement-controls .hint { margin: 8px 0 0; }
+.settings .hint { margin: -4px 0 0; }
 .screen-connection { margin-top: 16px; padding-top: 12px; border-top: 1px solid #2b3c4a; }
 .screen-connection h4 { margin: 0; font-size: 13px; }
 .screen-connection .toolbar { margin-bottom: 0; }
@@ -180,6 +190,7 @@ small { font-size: 11px; color: #a5becc; }
   #app { padding: 8px; }
   .panel { padding: 10px; }
   .settings-overview:not([hidden]) { grid-template-columns: 1fr; }
+  .measurement-controls { grid-template-columns: 1fr; }
   .map-readouts { inset: 6px auto auto 6px; max-width: calc(100% - 12px); padding: 5px 0; }
   .map-readouts > div { padding: 0 7px; }
   .map-readouts dt { font-size: 11px; }

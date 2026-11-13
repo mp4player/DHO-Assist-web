@@ -5,7 +5,9 @@ export function parseCoordinates(text, width=16384, height=8192) {
   return x>=0 && y>=0 && x<width && y<height ? {x,y} : null;
 }
 
-export function gameHudRegions(width, height) {
+export function gameHudRegions(width, height, {right = 0, bottom = 0} = {}) {
+  width -= right;
+  height -= bottom;
   if (width < 148 || height < 276) return {};
   // The survey and compass are anchored to the client area's bottom-right corner.
   // Leave a few pixels around the tiny survey text for window borders and OCR.
@@ -128,12 +130,117 @@ export function directionVector(angle,length) {
   const r=angle*Math.PI/180;return {x:Math.sin(r)*length,y:-Math.cos(r)*length};
 }
 
-export function measureMotion(previous, current, seconds, worldWidth) {
-  if (!(seconds > 0 && Number.isFinite(seconds) && worldWidth > 0)) return null;
+// The sailing-day counter uses a separate, centered font with an 8 px digit pitch.
+const dayGlyphs = [
+  0b111110000001011100, 0b100001111111000000, 0b110011001011110011,
+  0b110011001001110111, 0b001000011111000001, 0b101011101001000110,
+  0b111111001001100110, 0b100011101110100000, 0b110110001001110110,
+  0b111011000001011110,
+];
+
+export function hasSailingDay({data, width}, left = 0, top = 0) {
+  function bright(x, y) {
+    const pixel = ((top + y) * width + left + x) * 4;
+    return data[pixel] + data[pixel + 1] + data[pixel + 2] > 384;
+  }
+  let count = 3;
+  if (!bright(10, 4) && !bright(10, 10)) count = 2;
+  else if (!bright(2, 4) && !bright(2, 10)) count = 1;
+  for (let digit = 0; digit < count; digit++) {
+    let glyph = 0;
+    const start = (3 - count) * 4 + digit * 8;
+    for (let x = 0; x < 6; x += 2) {
+      for (let y = 0; y < 11; y += 2) {
+        glyph = (glyph << 1) | Number(bright(start + x, y));
+      }
+    }
+    if (!dayGlyphs.includes(glyph)) return false;
+  }
+  return true;
+}
+
+export function findSailingDay(image) {
+  for (let y = 0; y <= image.height - 11; y++) {
+    for (let x = 0; x <= image.width - 21; x++) {
+      if (hasSailingDay(image, x, y)) return {x, y};
+    }
+  }
+  return null;
+}
+
+export function estimatePosition(fix, elapsed, worldWidth, worldHeight) {
+  const displacement = directionVector(fix.angle, fix.speed * elapsed);
+  const x = ((fix.position.x + displacement.x) % worldWidth + worldWidth) % worldWidth;
+  const y = Math.max(0, Math.min(worldHeight - 1, fix.position.y + displacement.y));
+  return {x, y};
+}
+
+export function shouldEstimatePosition(attempts, windowMs) {
+  const latest = attempts.at(-1);
+  if (!latest?.failed) return false;
+
+  let total = 0;
+  let failures = 0;
+  let consecutive = true;
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const {time, failed} = attempts[i];
+    const age = latest.time - time;
+    if (age > windowMs && !consecutive) break;
+    consecutive &&= failed;
+    if (consecutive && age >= 2000) return true;
+    if (age <= windowMs) {
+      total++;
+      if (failed) failures++;
+    }
+  }
+  // A single failed read can be half of a short window during startup.
+  return failures >= 2 && failures * 2 >= total;
+}
+
+function wrappedDeltaX(previous, current, worldWidth) {
   const rawX = current.x - previous.x;
-  const dx = Math.abs(rawX) > worldWidth / 2 ? rawX - Math.sign(rawX) * worldWidth : rawX;
-  const dy = current.y - previous.y;
-  const distance = Math.hypot(dx, dy);
-  const course = distance ? (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360 : null;
-  return {speed: distance / seconds, course};
+  return Math.abs(rawX) > worldWidth / 2 ? rawX - Math.sign(rawX) * worldWidth : rawX;
+}
+
+export function appendMotionSamples(samples, previous, current, worldWidth) {
+  const intervalMs = 1000;
+  let time = samples.at(-1).time + intervalMs;
+  if (time > current.time) return false;
+
+  const dx = wrappedDeltaX(previous.position, current.position, worldWidth);
+  const dy = current.position.y - previous.position.y;
+  for (; time <= current.time; time += intervalMs) {
+    const fraction = (time - previous.time) / (current.time - previous.time);
+    const x = previous.position.x + dx * fraction;
+    const y = previous.position.y + dy * fraction;
+    samples.push({time, position: {x: (x + worldWidth) % worldWidth, y}});
+  }
+  return true;
+}
+
+function courseFromDisplacement(dx, dy) {
+  return dx || dy ? (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360 : null;
+}
+
+export function measureAverageMotion(fixes, windowMs, worldWidth) {
+  if (fixes.length < 2) return null;
+  const end = fixes.at(-1).time;
+  const start = Math.max(fixes[0].time, end - windowMs);
+  if (!(end > start && worldWidth > 0)) return null;
+
+  let dx = 0;
+  let dy = 0;
+  let distance = 0;
+  for (let i = fixes.length - 1; i > 0 && fixes[i].time > start; i--) {
+    const previous = fixes[i - 1];
+    const current = fixes[i];
+    // Use only the fraction of this segment inside the averaging window.
+    const fraction = (current.time - Math.max(previous.time, start)) / (current.time - previous.time);
+    const segmentX = wrappedDeltaX(previous.position, current.position, worldWidth) * fraction;
+    const segmentY = (current.position.y - previous.position.y) * fraction;
+    dx += segmentX;
+    dy += segmentY;
+    distance += Math.hypot(segmentX, segmentY);
+  }
+  return {speed: distance * 1000 / (end - start), course: courseFromDisplacement(dx, dy)};
 }

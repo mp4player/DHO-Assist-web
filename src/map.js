@@ -148,19 +148,19 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     context.setLineDash([]);
   }
 
-  function drawPosition(x, y, tileWidth, position) {
+  function drawPosition(x, y, tileWidth, position, estimated) {
     context.font = '12px monospace';
-    const label = `${position.x}, ${position.y}`;
+    const label = estimated ? `예상 ${Math.floor(position.x)}, ${Math.floor(position.y)}` : `${position.x}, ${position.y}`;
     const labelWidth = context.measureText(label).width + 14;
     const first = Math.ceil((-x - labelWidth) / tileWidth);
     const last = Math.floor((width - x + 16) / tileWidth);
     for (let copy = first; copy <= last; copy++) {
       const marker = x + copy * tileWidth;
-      context.fillStyle = '#80efd0';
+      context.fillStyle = estimated ? '#ffca80' : '#80efd0';
       context.beginPath();
       context.arc(marker, y, 6, 0, Math.PI * 2);
       context.fill();
-      context.strokeStyle = '#80efd066';
+      context.strokeStyle = estimated ? '#ffca8066' : '#80efd066';
       context.lineWidth = 1;
       context.beginPath();
       context.arc(marker, y, 15, 0, Math.PI * 2);
@@ -170,10 +170,10 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     }
   }
 
-  function draw(image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength) {
+  function draw(image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength, estimated = false) {
     const imageAspect = image ? image.naturalWidth / image.naturalHeight : 2;
     if (imageAspect !== aspect) resize(width, height, imageAspect);
-    const inputs = [image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength];
+    const inputs = [image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength, estimated];
     if (!dirty && inputs.every((input, index) => Object.is(input, lastDraw[index]))) return;
     dirty = false;
     lastDraw = inputs;
@@ -202,7 +202,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     if (Number.isFinite(lineLength)) {
       const bearings = [
         {angle: course, color: '#ffca80', dash: []},
-        {angle, color: '#80efd0', dash: [8, 6]},
+        {angle: estimated ? null : angle, color: '#80efd0', dash: [8, 6]},
       ];
       for (const bearing of bearings) {
         if (bearing.angle === null) continue;
@@ -214,7 +214,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
         drawDirection(x, y, tileWidth, dx, dy, bearing.color, bearing.dash);
       }
     }
-    drawPosition(x, y, tileWidth, position);
+    drawPosition(x, y, tileWidth, position, estimated);
     context.restore();
   }
 

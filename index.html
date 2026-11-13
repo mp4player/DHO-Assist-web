@@ -11,19 +11,22 @@
       <section class="panel map" aria-labelledby="mapTitle">
         <div class="section-title">
           <h1 id="mapTitle">DHO Assist 항해 지도</h1>
-          <div class="toolbar map-controls" role="group" aria-label="지도 배율">
+          <div class="toolbar map-controls" role="group" aria-label="지도 조작 및 화면 공유">
             <button id="mapZoomOut" type="button" aria-label="지도 축소">−</button>
             <output id="mapZoomLevel" aria-label="현재 지도 배율">100%</output>
             <button id="mapZoomIn" type="button" aria-label="지도 확대">+</button>
             <button id="mapReset" type="button">지도 초기화</button>
+            <button id="mapShare" type="button" data-share-start>게임 화면 공유</button>
           </div>
         </div>
+        <p id="mapShareMessage" class="hint" role="status" hidden></p>
         <div class="map-viewport">
           <canvas id="map" width="1200" height="600" tabindex="0" aria-label="좌표와 방향선 지도" aria-describedby="mapHint"></canvas>
           <dl class="map-readouts" aria-label="항해 정보">
             <div><dt>속도 <span>좌표/초</span></dt><dd id="speed">—</dd></div>
             <div><dt>시점 방위</dt><dd id="heading">—°</dd></div>
             <div><dt>실제 항로 방위</dt><dd id="course">—°</dd></div>
+            <div id="estimatedLocation" role="status" hidden><dt>위치 상태</dt><dd>예상 위치</dd></div>
           </dl>
           <button id="openSettings" class="settings-button" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">설정</button>
         </div>
@@ -75,6 +78,14 @@
             </label>
             <label>OCR 최소 신뢰도<input id="confidence" type="number" required step="any" value="45" min="0" max="100"></label>
             <label>나침반 각도 보정 (°)<input id="offset" type="number" required step="any" value="0" min="-360" max="360"></label>
+            <label>방위각 표기
+              <select id="bearingStep" aria-describedby="bearingStepHint">
+                <option value="2" selected>2도 단위</option>
+                <option value="1">1도 단위 (실험중)</option>
+                <option value="0.1">0.1도 단위 (실험중)</option>
+              </select>
+            </label>
+            <p id="bearingStepHint" class="hint">작은 단위로 표시할수록 화면과 좌표의 작은 변화가 드러나 방위 오차가 커 보일 수 있습니다.</p>
             <label>방향선 길이 (지도 단위)<input id="lineLength" type="number" required step="any" value="1200" min="0" max="16384"></label>
           </div>
         </section>
@@ -89,6 +100,27 @@
             <label>지도 원점 Y<input id="originY" type="number" required step="any" value="0"></label>
           </div>
           <p class="hint">지도 원점은 이미지 왼쪽 위의 게임 좌표입니다. X는 동쪽, Y는 남쪽으로 증가합니다.</p>
+        </section>
+        <section class="recognition-rate" aria-labelledby="recognitionRateTitle">
+          <h3 id="recognitionRateTitle">화면 인식 속도</h3>
+          <div class="settings measurement-controls">
+            <div>
+              <label for="recognitionFps">초당 프레임</label>
+              <div class="measurement-inputs">
+                <input id="recognitionFps" type="number" required value="1" min="1" max="10" step="1" aria-describedby="recognitionRateHint">
+                <input id="recognitionFpsSlider" type="range" value="1" min="1" max="10" step="1" aria-label="초당 프레임 슬라이더" aria-describedby="recognitionRateHint">
+              </div>
+              <p id="recognitionRateHint" class="hint">초당 1~10프레임. 실제 속도는 OCR 처리 시간에 따라 달라집니다.</p>
+            </div>
+            <div>
+              <div class="measurement-label">
+                <label for="motionAverageSeconds">속도·실제 항로 방위 평균 구간</label>
+                <output id="motionAverageValue" for="motionAverageSeconds">20초</output>
+              </div>
+              <input id="motionAverageSeconds" type="range" value="20" min="1" max="60" step="1" aria-describedby="motionAverageHint">
+              <p id="motionAverageHint" class="hint">1~60초. 구간이 길수록 표시가 안정되고 속도나 방향 변화가 늦게 반영됩니다.</p>
+            </div>
+          </div>
         </section>
       </form>
       <form id="capturePanel" class="capture-panel" role="tabpanel" aria-labelledby="captureTab" hidden>

@@ -148,11 +148,14 @@ try{
  const page=await browser.newPage({viewport:{width:1440,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(process.env.TEST_URL||'http://localhost:5173');
  assert.equal(await page.locator('#settingsDialog').isVisible(), false);
+ const mapShare = page.locator('#mapReset + #mapShare');
+ assert.equal(await mapShare.textContent(), '게임 화면 공유');
  await page.getByRole('button', {name:'설정', exact:true}).click();
  assert.equal(await page.getByRole('dialog', {name:'설정'}).isVisible(), true);
- const shareStart = page.getByRole('button', {name:'게임 화면 공유', exact:true});
- const shareChange = page.getByRole('button', {name:'게임 화면 변경', exact:true});
- const shareStop = page.getByRole('button', {name:'공유 종료', exact:true});
+ const settings = page.locator('#settingsDialog');
+ const shareStart = settings.getByRole('button', {name:'게임 화면 공유', exact:true});
+ const shareChange = settings.getByRole('button', {name:'게임 화면 변경', exact:true});
+ const shareStop = settings.getByRole('button', {name:'공유 종료', exact:true});
  const resetSettings = page.getByRole('button', {name:'설정 초기화', exact:true});
  const saveSettings = page.getByRole('button', {name:'변경사항 저장', exact:true});
  const cancelSettings = page.getByRole('button', {name:'변경사항 취소', exact:true});
@@ -203,7 +206,7 @@ try{
  await page.evaluate(() => {
    const canvas = document.createElement('canvas');
    const context = canvas.getContext('2d');
-   function drawHud(width, height, coordinates) {
+   function drawHud(width, height, coordinates, sailingDay = false) {
      canvas.width = width;
      canvas.height = height;
      context.fillStyle = '#284254';
@@ -212,6 +215,12 @@ try{
      context.textAlign = 'right';
      context.fillStyle = '#fff';
      context.fillText(coordinates, width - 13, height - 264, 56);
+     if (sailingDay) {
+       const glyph = '100001111111000000';
+       for (let i = 0; i < glyph.length; i++) {
+         if (glyph[i] === '1') context.fillRect(23 + Math.floor(i / 6) * 2, 47 + (i % 6) * 2, 1, 1);
+       }
+     }
 
      const compassX = width - 148 + 56;
      const compassY = height - 108 + 39;
@@ -234,16 +243,29 @@ try{
      return stream;
    };
    window.moveTestCapture = () => drawHud(960, 540, '4321, 6543');
+   window.showSailingFix = () => drawHud(960, 540, '4361, 6543', true);
+   window.hideSurvey = () => drawHud(960, 540, '', true);
+   window.hideSailingDay = () => drawHud(960, 540, '');
    window.resizeTestCapture = () => drawHud(800, 450, '4321, 6543');
  });
 
  await shareStart.click();
  await page.waitForFunction(() => document.getElementById('message').textContent.includes('Test picker cancelled'));
+ await page.locator('#closeSettings').click();
+ await mapShare.click();
+ await page.waitForFunction(() => document.getElementById('position').textContent === '1234 / 3456');
+ assert.equal(await mapShare.textContent(), '게임 화면 변경');
+ assert.equal(await page.locator('#track').textContent(), '연속 인식 중지');
+ await mapShare.click();
+ await page.waitForFunction(() => document.getElementById('mapShareMessage').textContent.includes('Test picker cancelled'));
+ assert.equal(await mapShare.textContent(), '게임 화면 변경');
+ assert.equal(await page.locator('#track').textContent(), '연속 인식 중지');
+ await page.locator('#openSettings').click();
  await page.locator('#captureTab').click();
  assert.equal(await resetSettings.isVisible(), true);
- await shareStart.click();
  await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-share-status]')).every(status => status.textContent === '게임 화면 공유 중'));
  assert.deepEqual(await page.evaluate(() => window.shareRequests), [
+   {video: {displaySurface: 'window'}, audio: false},
    {video: {displaySurface: 'window'}, audio: false},
    {video: {displaySurface: 'window'}, audio: false},
  ]);
@@ -255,12 +277,13 @@ try{
  await page.locator('#recognitionTab').click();
  assert.equal(await page.getByRole('group', {name: '화면 연결'}).count(), 0);
  assert.match(await page.locator('#selectionHint').textContent(), /자동으로 사용합니다/);
- await page.locator('#once').click();
  await page.waitForFunction(() => document.getElementById('state').textContent === '인식 완료');
  assert.equal(await page.locator('#position').textContent(), '1234 / 3456');
  assert.match(await page.locator('#raw').textContent(), /OCR 신뢰도/);
  const gameAngle = parseFloat(await page.locator('#heading').textContent());
  assert.ok(Math.abs(gameAngle - 296) < 4, `game heading ${gameAngle}`);
+ await page.locator('#track').click();
+ assert.equal(await page.locator('#track').textContent(), '연속 인식 시작');
 
  await page.locator('#captureTab').click();
  await selectRegion(page, 'coordRegion', 36, 30, 365, 78);
@@ -291,14 +314,65 @@ try{
  assert.equal(await page.locator('#offset').inputValue(), '25');
  await page.locator('#offset').fill('0');
  await page.locator('#track').click();
+ assert.equal(await page.locator('#track').textContent(), '연속 인식 중지');
  await page.waitForFunction(() => document.getElementById('state').textContent === '인식 완료');
  await page.locator('#closeSettings').click();
  await page.waitForFunction(() => document.getElementById('speed').textContent === '0.0');
  assert.equal(await page.locator('#course').textContent(), '—°');
  await page.evaluate(() => window.moveTestCapture());
- await page.waitForFunction(() => document.getElementById('course').textContent === '135.0°');
+ await page.waitForFunction(() => document.getElementById('course').textContent === '136°');
  assert.ok(parseFloat(await page.locator('#speed').textContent()) > 0);
  assert.ok(Math.abs(parseFloat(await page.locator('#heading').textContent()) - gameAngle) < 3);
+ const movingSpeed = parseFloat(await page.locator('#speed').textContent());
+ await page.waitForFunction(speed => {
+   const average = parseFloat(document.getElementById('speed').textContent);
+   return average > 0 && average < speed;
+ }, movingSpeed);
+ await page.locator('#openSettings').click();
+ const averageSlider = page.locator('#motionAverageSeconds');
+ await averageSlider.press('Home');
+ assert.equal(await page.locator('#motionAverageValue').textContent(), '1초');
+ assert.equal(await page.locator('#course').textContent(), '136°');
+ await saveSettings.click();
+ await page.waitForFunction(() => document.getElementById('speed').textContent === '0.0'
+   && document.getElementById('course').textContent === '—°');
+ await averageSlider.fill('20');
+ await saveSettings.click();
+ assert.equal(await page.locator('#course').textContent(), '136°');
+ await page.locator('#bearingStep').selectOption({label: '1도 단위 (실험중)'});
+ assert.match(await page.locator('#previewHeading').textContent(), /^\d+°$/);
+ assert.equal(await page.locator('#course').textContent(), '136°');
+ await saveSettings.click();
+ assert.equal(await page.locator('#course').textContent(), '135°');
+ await page.locator('#bearingStep').selectOption({label: '0.1도 단위 (실험중)'});
+ await saveSettings.click();
+ assert.equal(await page.locator('#course').textContent(), '135.0°');
+ await page.locator('#closeSettings').click();
+ await page.waitForFunction(() => document.getElementById('course').textContent === '—°'
+   && document.getElementById('speed').textContent === '0.0', null, {timeout: 25000});
+
+ await page.evaluate(() => window.showSailingFix());
+ await page.waitForFunction(() => document.getElementById('position').textContent === '4361 / 6543');
+ await page.waitForFunction(() => document.getElementById('course').textContent === '90.0°');
+ await page.evaluate(() => {
+   const context = document.getElementById('map').getContext('2d');
+   const stroke = context.stroke;
+   context.stroke = function (...args) {
+     if (!document.getElementById('estimatedLocation').hidden && this.strokeStyle === '#ffca80'
+       && this.lineWidth === 2 && this.getLineDash().length === 0) window.estimatedCourseDrawn = true;
+     return stroke.apply(this, args);
+   };
+ });
+ await page.evaluate(() => window.hideSurvey());
+ await page.waitForFunction(() => document.getElementById('position').textContent === '인식 실패');
+ assert.ok(await page.locator('#estimatedLocation').isHidden());
+ await page.locator('#estimatedLocation').waitFor({state:'visible'});
+ assert.equal(await page.locator('#course').textContent(), '90.0°');
+ assert.equal(await page.evaluate(() => window.estimatedCourseDrawn), true);
+ await page.waitForTimeout(5500);
+ assert.ok(await page.locator('#estimatedLocation').isVisible());
+ await page.evaluate(() => window.hideSailingDay());
+ await page.locator('#estimatedLocation').waitFor({state:'hidden', timeout:7000});
 
  await page.locator('#openSettings').click();
  assert.equal(await page.locator('#recognitionTab').getAttribute('aria-selected'), 'true');
@@ -315,6 +389,7 @@ try{
  assert.deepEqual(await page.locator('[data-share-status]').allTextContents(), ['게임 화면 공유 중', '게임 화면 공유 중']);
  await shareStop.click();
  assert.deepEqual(await page.locator('[data-share-status]').allTextContents(), ['연결 대기', '연결 대기']);
+ assert.equal(await mapShare.textContent(), '게임 화면 공유');
  assert.equal(await shareStart.isVisible(), true);
  assert.equal(await shareStop.count(), 0);
  await expectReset(page);
@@ -322,11 +397,30 @@ try{
  await page.locator('#recognitionTab').click();
  assert.equal(await shareStart.isVisible(), true);
  await page.locator('#offset').fill('21');
+ await page.locator('#recognitionFps').fill('10');
+ const fpsSlider = page.locator('#recognitionFpsSlider');
+ assert.equal(await fpsSlider.inputValue(), '10');
+ await fpsSlider.press('Home');
+ assert.equal(await page.locator('#recognitionFps').inputValue(), '1');
+ await fpsSlider.press('End');
+ await averageSlider.press('End');
+ assert.equal(await page.locator('#motionAverageValue').textContent(), '60초');
  await saveSettings.click();
  await page.locator('#offset').fill('33');
  await page.reload();
  await page.locator('#openSettings').click();
  assert.equal(await page.locator('#offset').inputValue(), '21');
+ assert.equal(await page.locator('#bearingStep').inputValue(), '0.1');
+ assert.equal(await page.locator('#recognitionFps').inputValue(), '10');
+ assert.equal(await fpsSlider.inputValue(), '10');
+ assert.equal(await averageSlider.inputValue(), '60');
+ await resetSettings.click();
+ assert.equal(await page.locator('#bearingStep').inputValue(), '2');
+ assert.equal(await fpsSlider.inputValue(), '1');
+ assert.equal(await page.locator('#motionAverageValue').textContent(), '20초');
+ await cancelSettings.click();
+ assert.equal(await fpsSlider.inputValue(), '10');
+ assert.equal(await page.locator('#motionAverageValue').textContent(), '60초');
  assert.equal(await saveSettings.isVisible(), false);
 
  assert.deepEqual(errors,[]);

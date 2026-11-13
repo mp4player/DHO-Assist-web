@@ -1,6 +1,6 @@
 import './style.css';
 import {createWorker,PSM} from 'tesseract.js';
-import {parseCoordinates,compassAngle,gameHudRegions,gameCompassAngle,readSurveyText,measureMotion} from './vision.js';
+import {parseCoordinates,compassAngle,gameHudRegions,gameCompassAngle,readSurveyText,appendMotionSamples,measureAverageMotion,hasSailingDay,findSailingDay,estimatePosition,shouldEstimatePosition} from './vision.js';
 import {createMapView} from './map.js';
 const $=id=>document.getElementById(id), capture=$('capture'), ctx=capture.getContext('2d'), video=$('video');
 const frame=document.createElement('canvas'), fc=frame.getContext('2d',{willReadFrequently:true});
@@ -14,10 +14,22 @@ const mapView = createMapView($('map'), {
 });
 let source=null,stream=null,draftRegions={},selecting=null,start=null,drag=null,busy=false,running=false,workerPromise=null,position=null,angle=null,generation=0,lastTick=0;
 let useGameHud = false;
-let previousFix = null;
+const motionSamples = [];
+let previousMotionFix = null;
 let course = null;
 let trackingSince = Infinity;
 const maxFixGap = 6000;
+const predictionWindowMs = 20_000;
+const sailingTimeoutMs = 5000;
+const knotsPerCoordinatePerSecond = 3.3014197;
+let sailingDayRegion = null;
+let lastSailingDay = -Infinity;
+const coordinateAttempts = [];
+let lastMeasuredPosition = null;
+let lastMeasuredCourse = null;
+let predictionFix = null;
+let estimatedPosition = null;
+let nextEstimate = 0;
 function message(text) {
   $('message').textContent = text;
   $('screenMessage').textContent = text;
@@ -27,7 +39,11 @@ const autoRegionHint = '게임 화면 오른쪽 아래의 측량 좌표와 나�
 const settingsDialog = $('settingsDialog');
 const capturePanel = $('capturePanel');
 const recognitionPanel = $('recognitionPanel');
-const settingsFields = [...recognitionPanel.querySelectorAll('.settings input, .settings select')];
+const recognitionFps = $('recognitionFps');
+const recognitionFpsSlider = $('recognitionFpsSlider');
+const motionAverageSeconds = $('motionAverageSeconds');
+const maxMotionWindowMs = Number(motionAverageSeconds.max) * 1000;
+const settingsFields = [...recognitionPanel.querySelectorAll('.settings input:not(#recognitionFpsSlider), .settings select')];
 const defaultValues = readSettings();
 const settingsKey = 'dho-assist.settings.v1';
 const recognitionKeys = ['preprocess', 'confidence', 'offset', 'worldWidth', 'worldHeight'];
@@ -38,6 +54,7 @@ let savedMap = null;
 let draftMap = null;
 let loadingMap = false;
 let savedResult = null;
+let previewBearing = null;
 let previewVersion = 0;
 let previewRequested = false;
 let liveRequested = false;
@@ -54,6 +71,9 @@ const demoRegions = {
   coord: {x: 36, y: 30, w: 365, h: 78},
   compass: {x: 772, y: 30, w: 140, h: 140},
 };
+// On Windows, Firefox window sharing includes extra pixels beyond the game client.
+const firefoxWindowInsets = /\bWindows NT\b/.test(navigator.userAgent) && /\bFirefox\//.test(navigator.userAgent)
+  ? {right: 4, bottom: 5} : undefined;
 
 function readSettings() {
   return Object.fromEntries(settingsFields.map(field => [field.id, field.value]));
@@ -61,6 +81,12 @@ function readSettings() {
 
 function writeSettings(values) {
   for (const field of settingsFields) field.value = values[field.id];
+  syncMeasurementControls();
+}
+
+function syncMeasurementControls() {
+  if (recognitionFps.validity.valid) recognitionFpsSlider.value = recognitionFps.value;
+  $('motionAverageValue').textContent = `${motionAverageSeconds.value}초`;
 }
 
 function restoreSettings() {
@@ -103,13 +129,19 @@ function refreshPreview() {
 }
 
 function editSettings() {
+  syncMeasurementControls();
   const previous = draftValues;
   draftValues = readSettings();
   if (recognitionKeys.some(key => previous[key] !== draftValues[key])) refreshPreview();
+  if (previous.bearingStep !== draftValues.bearingStep) showPreviewBearing();
   updateSettingsButtons();
 }
 
 for (const field of settingsFields) field.addEventListener('input', editSettings);
+recognitionFpsSlider.addEventListener('input', () => {
+  recognitionFps.value = recognitionFpsSlider.value;
+  editSettings();
+});
 
 $('saveSettings').onclick = () => {
   if (loadingMap) return;
@@ -119,6 +151,7 @@ $('saveSettings').onclick = () => {
     return;
   }
   const changedRecognition = previewDiffers();
+  const changedMotionWindow = savedValues.motionAverageSeconds !== draftValues.motionAverageSeconds;
   savedValues = draftValues;
   savedRegions = {...draftRegions};
   savedMap = draftMap;
@@ -129,10 +162,14 @@ $('saveSettings').onclick = () => {
     message('변경사항을 적용했습니다. 브라우저 저장소에 기록할 수 없어 이 페이지에서만 유지됩니다.');
   }
   if (changedRecognition) {
-    if (running && !hasRegions(savedRegions)) setTracking(false);
+    if (running && source !== 'video' && !hasRegions(savedRegions)) setTracking(false);
     resetRecognition();
     liveRequested = Boolean(source) && hasRegions(savedRegions);
+    if (liveRequested) showMapShareMessage();
+  } else if (changedMotionWindow) {
+    showAverageMotion(Number(savedValues.worldWidth));
   }
+  showMapBearings();
   updateSettingsButtons();
 };
 
@@ -205,17 +242,85 @@ settingsDialog.onclose = () => {
 
 function showMotion(motion = null) {
   course = motion?.course ?? null;
+  if (course !== null) lastMeasuredCourse = course;
   $('speed').textContent = motion ? motion.speed.toFixed(1) : '—';
-  $('course').textContent = course === null ? '—°' : formatBearing(course);
+  showCourseBearing();
 }
 
-function formatBearing(bearing) {
-  return `${((Math.round(bearing * 10) % 3600) / 10).toFixed(1)}°`;
+function roundBearing(bearing, step) {
+  if (bearing === null) return null;
+  const units = 1 / step;
+  return ((Math.round(bearing * units) % (360 * units)) / units);
+}
+
+function formatBearing(bearing, step) {
+  const rounded = roundBearing(bearing, step);
+  return rounded === null ? '—°' : `${rounded.toFixed(step < 1 ? 1 : 0)}°`;
+}
+
+function showMapBearings() {
+  $('heading').textContent = formatBearing(angle, Number(savedValues.bearingStep));
+  showCourseBearing();
+}
+
+function showCourseBearing() {
+  const displayCourse = estimatedPosition ? lastMeasuredCourse : course;
+  const text = formatBearing(displayCourse, Number(savedValues.bearingStep));
+  if ($('course').textContent !== text) $('course').textContent = text;
+}
+
+function showPreviewBearing() {
+  $('previewHeading').textContent = formatBearing(previewBearing, Number(draftValues.bearingStep));
 }
 
 function clearMotion() {
-  previousFix = null;
+  motionSamples.length = 0;
+  previousMotionFix = null;
   showMotion();
+}
+
+function showAverageMotion(worldWidth) {
+  const windowMs = Number(savedValues.motionAverageSeconds) * 1000;
+  showMotion(measureAverageMotion(motionSamples, windowMs, worldWidth));
+}
+
+function clearPrediction() {
+  coordinateAttempts.length = 0;
+  lastMeasuredPosition = null;
+  lastMeasuredCourse = null;
+  sailingDayRegion = null;
+  lastSailingDay = -Infinity;
+  predictionFix = null;
+  estimatedPosition = null;
+  $('estimatedLocation').hidden = true;
+  showCourseBearing();
+}
+
+function readSailingDay() {
+  if (!sailingDayRegion) return false;
+  const {x, y} = sailingDayRegion;
+  return hasSailingDay(fc.getImageData(x, y, 21, 11));
+}
+
+function rememberPredictionFix(time, worldWidth) {
+  const speed = measureAverageMotion(motionSamples, predictionWindowMs, worldWidth)?.speed ?? 0;
+  const knots = speed * knotsPerCoordinatePerSecond;
+  predictionFix = angle !== null && knots >= 1 && knots < 100 ? {position, angle, speed, time} : null;
+}
+
+function updateEstimatedPosition(time, worldWidth, worldHeight, estimateRequested) {
+  if (time - lastSailingDay > sailingTimeoutMs) {
+    predictionFix = null;
+  }
+  const wasEstimated = Boolean(estimatedPosition);
+  if (!predictionFix || !estimateRequested || time < predictionFix.time) {
+    estimatedPosition = null;
+  } else if (!estimatedPosition || time >= nextEstimate) {
+    estimatedPosition = estimatePosition(predictionFix, (time - predictionFix.time) / 1000, worldWidth, worldHeight);
+    nextEstimate = time + 200;
+  }
+  $('estimatedLocation').hidden = !estimatedPosition;
+  if (wasEstimated !== Boolean(estimatedPosition)) showCourseBearing();
 }
 
 function updateMotion(fix, time, worldWidth) {
@@ -223,11 +328,37 @@ function updateMotion(fix, time, worldWidth) {
     clearMotion();
     return;
   }
-  const previous = previousFix;
-  previousFix = {position: fix, time, worldWidth};
-  const elapsed = previous ? time - previous.time : Infinity;
-  showMotion(elapsed <= maxFixGap && previous.worldWidth === worldWidth
-    ? measureMotion(previous.position, fix, elapsed / 1000, worldWidth) : null);
+  const previous = previousMotionFix;
+  const current = {position: fix, time};
+  if (!previous || time <= previous.time || time - previous.time > maxFixGap) {
+    clearMotion();
+    previousMotionFix = current;
+    motionSamples.push(current);
+    return;
+  }
+  previousMotionFix = current;
+  if (!appendMotionSamples(motionSamples, previous, current, worldWidth)) return;
+  while (motionSamples[1]?.time <= motionSamples.at(-1).time - maxMotionWindowMs) motionSamples.shift();
+  showAverageMotion(worldWidth);
+}
+
+function recordCoordinateAttempt(time, worldWidth) {
+  const previousAttempt = coordinateAttempts.at(-1);
+  if (previousAttempt && time - previousAttempt.time > maxFixGap) coordinateAttempts.length = 0;
+  coordinateAttempts.push({time, failed: !position});
+  while (coordinateAttempts[0].time < time - maxMotionWindowMs) coordinateAttempts.shift();
+
+  if (position) {
+    lastMeasuredPosition = position;
+    updateMotion(position, time, worldWidth);
+    if (time - lastSailingDay <= sailingTimeoutMs) rememberPredictionFix(time, worldWidth);
+  } else if (estimateRequested()) {
+    clearMotion();
+  }
+}
+
+function estimateRequested() {
+  return !position && shouldEstimatePosition(coordinateAttempts, Number(savedValues.motionAverageSeconds) * 1000);
 }
 
 function resetRecognition() {
@@ -237,6 +368,7 @@ function resetRecognition() {
   savedResult = null;
   liveRequested = false;
   clearMotion();
+  clearPrediction();
   $('heading').textContent = '—°';
   refreshPreview();
 }
@@ -274,11 +406,14 @@ function stopSource() {
   $('autoRegions').disabled = true;
   resetCaptureRegions();
   setSourceLabel('연결 대기');
+  showMapShareMessage();
 }
 function setSize(w,h){frame.width=capture.width=w;frame.height=capture.height=h;}
 function defaultRegions() {
   if (source === 'demo') return {...demoRegions};
-  return useGameHud ? gameHudRegions(frame.width, frame.height) : {};
+  if (!useGameHud) return {};
+  const insets = source === 'video' ? firefoxWindowInsets : undefined;
+  return gameHudRegions(frame.width, frame.height, insets);
 }
 
 function setSourceRegions() {
@@ -320,10 +455,22 @@ capturePanel.onreset = () => {
     : '기본 인식 영역을 미리봅니다. 변경사항 저장을 눌러 적용하세요.');
 };
 
-async function startSharing() {
+function showMapShareMessage(text = '') {
+  const status = $('mapShareMessage');
+  status.textContent = text;
+  status.hidden = !text;
+}
+
+async function startSharing(event) {
   if (pendingShare) return;
+  const fromMap = event.currentTarget === $('mapShare');
+  showMapShareMessage();
+  const report = text => {
+    message(text);
+    if (fromMap) showMapShareMessage(text);
+  };
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    message('화면 공유를 지원하는 데스크톱 Chrome에서 HTTPS 또는 localhost로 접속하세요.');
+    report('화면 공유를 지원하는 데스크톱 브라우저에서 HTTPS 또는 localhost로 접속하세요.');
     return;
   }
   const request = {cancelled: false};
@@ -353,14 +500,17 @@ async function startSharing() {
     const {displaySurface} = track.getSettings();
     useGameHud = !displaySurface || displaySurface === 'window';
     setSourceRegions();
+    setTracking(true);
     setSourceLabel('게임 화면 공유 중');
-    message(draftRegions.coord
-      ? '게임에서 측량을 켜고 인식을 시작하세요.'
-      : '좌표와 나침반 영역을 지정하세요. 자동 영역은 게임 창을 공유할 때 적용됩니다.');
+    if (hasRegions(savedRegions)) {
+      message('연속 인식을 시작했습니다. 게임에서 측량을 켜세요.');
+    } else {
+      report('설정의 화면 및 영역 탭에서 좌표와 나침반 영역을 지정하고 저장하면 인식이 시작됩니다.');
+    }
   } catch (error) {
     if (request.cancelled || (next && stream !== next)) return;
     if (next) stopSource();
-    message('화면 공유를 시작하지 못했습니다: ' + error.message);
+    report('화면 공유를 시작하지 못했습니다: ' + error.message);
   } finally {
     pendingShare = null;
     for (const button of shareStarts) button.disabled = false;
@@ -502,7 +652,8 @@ async function readRecognition(captured) {
 function showPreview(result, status) {
   const fix = result?.position;
   $('position').textContent = fix ? fix.x + ' / ' + fix.y : result ? '인식 실패' : '— / —';
-  $('previewHeading').textContent = result?.angle == null ? '—°' : formatBearing(result.angle);
+  previewBearing = result?.angle ?? null;
+  showPreviewBearing();
   $('raw').textContent = result?.raw ?? '—';
   $('state').textContent = status ?? (result?.error ? '오류' : fix && result.angle !== null ? '인식 완료' : result ? '확인 필요' : '대기');
 }
@@ -526,6 +677,11 @@ async function recognize({live, preview, manual = false}) {
   if (preview) previewRequested = false;
   try {
     const samples = new Map();
+    const trackingFrame = live && running && source === 'video' && fixTime >= trackingSince;
+    const sailingDayVisible = trackingFrame && readSailingDay();
+    // The shared window can include the title bar and visible borders.
+    const sailingSearch = trackingFrame && !sailingDayRegion && useGameHud && frame.width >= 43 && frame.height >= 86
+      ? fc.getImageData(14, 19, 29, 67) : null;
     const liveCapture = live ? captureRecognition(values, savedRegions, samples) : null;
     const draftCapture = preview ? captureRecognition(draftValues, draftRegions, samples) : null;
     if (draftCapture || (liveCapture && !previewDiffers())) showPreview(null, '분석 중');
@@ -536,8 +692,20 @@ async function recognize({live, preview, manual = false}) {
       savedResult = result;
       position = result.position;
       angle = result.angle;
-      updateMotion(position, fixTime, Number(values.worldWidth));
-      $('heading').textContent = angle === null ? '—°' : formatBearing(angle);
+      const worldWidth = Number(values.worldWidth);
+      const stillTracking = trackingFrame && running && fixTime >= trackingSince;
+      if (stillTracking) {
+        if (sailingDayVisible) lastSailingDay = fixTime;
+        if (position && sailingSearch && !sailingDayRegion) {
+          const match = findSailingDay(sailingSearch);
+          if (match) {
+            sailingDayRegion = {x: 14 + match.x, y: 19 + match.y};
+            lastSailingDay = fixTime;
+          }
+        }
+        recordCoordinateAttempt(fixTime, worldWidth);
+      }
+      $('heading').textContent = formatBearing(angle, Number(savedValues.bearingStep));
       if (!previewDiffers()) showPreview(result);
       if (manual && !draftCapture) message(recognitionMessage(result));
     }
@@ -569,8 +737,10 @@ $('once').onclick = () => {
 };
 function setTracking(active) {
   running = active;
+  lastTick = -Infinity;
   trackingSince = active ? performance.now() : Infinity;
   clearMotion();
+  clearPrediction();
   $('track').textContent = active ? '연속 인식 중지' : '연속 인식 시작';
 }
 
@@ -581,20 +751,25 @@ $('track').onclick = () => {
   }
   setTracking(!running);
 };
-function drawMap() {
+function drawMap(time) {
   const defaultReady = defaultMapImage.complete && defaultMapImage.naturalWidth;
   const image = savedMap?.image ?? (defaultReady ? defaultMapImage : null);
-  const {worldWidth, worldHeight, originX, originY, lineLength} = savedValues;
-  mapView.draw(image, position, angle, course, Number(worldWidth), Number(worldHeight),
-    Number(originX), Number(originY), Number(lineLength));
+  const {worldWidth, worldHeight, originX, originY, lineLength, bearingStep} = savedValues;
+  const requested = estimateRequested();
+  updateEstimatedPosition(time, Number(worldWidth), Number(worldHeight), requested);
+  const step = Number(bearingStep);
+  const mapPosition = position ?? (requested ? estimatedPosition : lastMeasuredPosition);
+  const mapCourse = estimatedPosition ? lastMeasuredCourse : course;
+  mapView.draw(image, mapPosition, roundBearing(angle, step), roundBearing(mapCourse, step),
+    Number(worldWidth), Number(worldHeight), Number(originX), Number(originY), Number(lineLength), Boolean(estimatedPosition));
 }
 function render(time){if(source==='demo')drawDemo();else if(source==='video'&&video.readyState>=2){
   if (frame.width !== video.videoWidth || frame.height !== video.videoHeight) {
-    const resume = running && savedRegions.coord?.gameHud && savedRegions.compass?.gameHud;
+    const resume = running;
     setSize(video.videoWidth, video.videoHeight);
     resetCaptureRegions();
     setSourceRegions();
-    if (resume && draftRegions.coord) {
+    if (resume) {
       setTracking(true);
     }
     message(draftRegions.coord ? '화면 크기에 맞춰 자동 영역을 다시 적용했습니다.' : '공유 화면 크기가 변경됐습니다. 인식 영역을 다시 지정하세요.');
@@ -614,10 +789,10 @@ function render(time){if(source==='demo')drawDemo();else if(source==='video'&&vi
      else canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
    }
  }
- if (previousFix && time - previousFix.time > maxFixGap) clearMotion();
- drawMap();
+ if (previousMotionFix && time - previousMotionFix.time > maxFixGap) clearMotion();
+ drawMap(time);
  if (source && !busy) {
-   const tick = running && time - lastTick > 1200;
+   const tick = running && time - lastTick >= 1000 / Number(savedValues.recognitionFps);
    const live = (tick || liveRequested) && hasRegions(savedRegions);
    const preview = settingsDialog.open && previewDiffers() && hasRegions(draftRegions) && (previewRequested || tick);
    if (tick) lastTick = time;
