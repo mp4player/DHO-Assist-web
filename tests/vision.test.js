@@ -1,9 +1,41 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCoordinates,compassAngle,directionVector,gameHudRegions,readSurveyText,appendMotionSamples,measureAverageMotion,shouldEstimatePosition} from '../src/vision.js';
+import {parseCoordinates,compassAngle,directionVector,gameHudRegions,readSurveyText,readSailingDay,updateSailingClock,nextSailingDayFraction,appendMotionSamples,measureAverageMotion,shouldEstimatePosition} from '../src/vision.js';
 test('coordinate parsing rejects incomplete, out-of-world and extra numbers',()=>{assert.deepEqual(parseCoordinates('12345, 3456\n'),{x:12345,y:3456});for(const s of ['-1,100','12345','16384,100','50,8192','1 2 3','no coordinates'])assert.equal(parseCoordinates(s),null);});
 test('compass rejects blank and detects a north red tip with offset',()=>{const im={width:100,height:100,data:new Uint8ClampedArray(40000)};assert.equal(compassAngle(im),null);for(let y=12;y<40;y++)for(let x=47;x<=52;x++){const i=(y*100+x)*4;im.data[i]=240;im.data[i+1]=20;im.data[i+2]=20;im.data[i+3]=255;}assert.ok(Math.abs(compassAngle(im).angle)<1);assert.ok(Math.abs(compassAngle(im,90).angle-90)<1);});
 test('north and east direction vectors use map Y downward',()=>{assert.deepEqual(directionVector(0,100),{x:0,y:-100});assert.ok(Math.abs(directionVector(90,100).x-100)<.001);});
+
+test('the sailing-day reader returns the HUD number, including zero', () => {
+  const glyphs = {0: '111110000001011100', 1: '100001111111000000', 2: '110011001011110011', 8: '110110001001110110'};
+  const image = {width: 21, data: new Uint8ClampedArray(21 * 11 * 4)};
+  assert.equal(readSailingDay(image), null);
+  for (const day of ['0', '12', '102', '812']) {
+    image.data.fill(0);
+    for (const [index, digit] of [...day].entries()) {
+      for (const [pixel, bit] of [...glyphs[digit]].entries()) {
+        if (bit === '0') continue;
+        const x = (3 - day.length) * 4 + index * 8 + Math.floor(pixel / 6) * 2;
+        const y = pixel % 6 * 2;
+        image.data.fill(255, (y * image.width + x) * 4, (y * image.width + x) * 4 + 4);
+      }
+    }
+    assert.equal(readSailingDay(image), Number(day));
+  }
+});
+
+test('the sailing clock uses a consecutive day change to locate the next arrow', () => {
+  let clock = updateSailingClock(null, 12, 0, 5000);
+  assert.equal(nextSailingDayFraction(clock.boundary, 500, 60000), 1);
+  clock = updateSailingClock(clock, 13, 1000, 5000);
+  assert.equal(clock.boundary, 500);
+  assert.equal(nextSailingDayFraction(clock.boundary, 30500, 60000), 0.5);
+  assert.equal(nextSailingDayFraction(clock.boundary, 45500, 60000), 0.25);
+  assert.equal(nextSailingDayFraction(clock.boundary, 61000, 60000), 0);
+  clock = updateSailingClock(clock, 13, 2000, 5000);
+  assert.equal(clock.boundary, 500);
+  assert.equal(updateSailingClock(clock, 1, 3000, 5000).boundary, null);
+  assert.equal(updateSailingClock(clock, 14, 8000, 5000).boundary, null);
+});
 
 test('motion uses the shortest east/west displacement and has no course at rest', () => {
   const west = {x: 98, y: 20};

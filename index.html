@@ -12,42 +12,115 @@
         <div class="section-title">
           <h1 id="mapTitle">DHO Assist 항해 지도</h1>
           <div class="toolbar map-controls" role="group" aria-label="지도 조작 및 화면 공유">
-            <button id="mapZoomOut" type="button" aria-label="지도 축소">−</button>
-            <output id="mapZoomLevel" aria-label="현재 지도 배율">100%</output>
-            <button id="mapZoomIn" type="button" aria-label="지도 확대">+</button>
-            <button id="mapReset" type="button">지도 초기화</button>
             <button id="mapShare" type="button" data-share-start>게임 화면 공유</button>
+            <button id="mapCompassShare" type="button" data-compass-share hidden>나침반 화면 추가</button>
           </div>
         </div>
         <p id="mapShareMessage" class="hint" role="status" hidden></p>
+        <div id="plannedRouteBar" class="toolbar" hidden>
+          <output id="plannedRouteSummary" aria-live="polite"></output>
+          <button id="openRouteHeadings" type="button" aria-haspopup="dialog" aria-controls="routeHeadingsDialog" hidden>선회 방위</button>
+          <button id="clearPlannedRoute" type="button">항로 지우기</button>
+          <output id="plannedRouteEstimate" aria-live="off" hidden></output>
+        </div>
+        <div class="map-workspace">
+          <aside id="mapSidebar" class="map-sidebar" aria-label="지도 도구">
+            <button id="toggleMapSidebar" class="sidebar-toggle" type="button" aria-label="지도 도구 펼치기" aria-expanded="false" aria-controls="mapSidebarBody">›</button>
+            <div id="mapSidebarBody" class="sidebar-body" hidden>
+              <div class="sidebar-zoom" role="group" aria-label="지도 배율 설정">
+                <div class="zoom-inputs">
+                  <button id="mapZoomOut" type="button" aria-label="지도 축소">−</button>
+                  <label><input id="mapZoomLevel" type="number" value="100" min="50" max="3200" step="1" aria-label="현재 지도 배율">%</label>
+                  <button id="mapZoomIn" type="button" aria-label="지도 확대">+</button>
+                </div>
+                <button id="mapReset" type="button">지도 초기화</button>
+              </div>
+              <details id="routePanel" class="route-panel">
+                <summary id="openRoutePlanner">자동 항로</summary>
+    <form id="routeForm" class="route-settings" autocomplete="off">
+      <div class="settings">
+        <div class="place-picker">
+          <label for="routeStart">출발지</label>
+          <input id="routeStart" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+            aria-controls="routeStartList" placeholder="도시 이름 검색">
+          <button class="place-picker-toggle" type="button" aria-label="출발지 목록 열기" tabindex="-1">▾</button>
+          <div class="place-picker-menu" hidden>
+            <div id="routeStartList" role="listbox" aria-label="출발지 목록"></div>
+            <div class="place-picker-empty" role="status" hidden>일치하는 도시가 없습니다.</div>
+          </div>
+        </div>
+        <div class="place-picker">
+          <label for="routeDestination">목적지</label>
+          <input id="routeDestination" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+            aria-controls="routeDestinationList" placeholder="도시 이름 검색">
+          <button class="place-picker-toggle" type="button" aria-label="목적지 목록 열기" tabindex="-1">▾</button>
+          <div class="place-picker-menu" hidden>
+            <div id="routeDestinationList" role="listbox" aria-label="목적지 목록"></div>
+            <div class="place-picker-empty" role="status" hidden>일치하는 도시가 없습니다.</div>
+          </div>
+        </div>
+        <label>항로 최적화
+          <select id="routeObjective">
+            <option value="distance">최단거리</option>
+            <option value="turns">최소 선회</option>
+            <option value="balanced">밸런스형</option>
+          </select>
+        </label>
+        <label>현재 계절
+          <output id="routeSeason" aria-describedby="routeWindHint"></output>
+        </label>
+      </div>
+      <div id="routeTransferOptions">
+        <label><input id="routeAutoTransfer" type="checkbox"> 자동 경유</label>
+        <fieldset id="routeTransferModes" disabled>
+          <legend>경유 수단</legend>
+          <label><input id="routeRail" type="checkbox"> 경로에 철도 이용</label>
+          <fieldset id="routeRailOptions" disabled>
+            <legend>철도 추가 경유지</legend>
+            <label><input id="routeTacoma" type="checkbox"> 경유지로 타코마 추가</label>
+            <label><input id="routeSoutheast" type="checkbox"> 경유지로 북미 대륙 남동쪽(상륙지) 추가</label>
+            <label><input id="routeEast" type="checkbox"> 경유지로 북미 대륙 동쪽(상륙지) 추가</label>
+          </fieldset>
+          <label><input id="routeCanalCart" type="checkbox"> 경로에 운하/마차 이용</label>
+          <fieldset id="routeCanalCartOptions" disabled>
+            <legend>추가 이동 수단</legend>
+            <label><input id="routeCamel" type="checkbox"> 수에즈-바스라 낙타 이동</label>
+          </fieldset>
+        </fieldset>
+      </div>
+      <p id="routeWindHint" class="hint">기준 속도 10 knot에 해역 증가율과 현재 계절의 풍향 배율을 적용합니다.</p>
+      <p class="hint">해상 구간의 진행 방위는 2° 단위입니다. 항구 가까이에서는 게임 화면을 확인하세요.</p>
+      <p id="routeStatus" role="status"></p>
+      <button id="calculateRoute" class="primary" type="submit">항로 계산</button>
+    </form>
+              </details>
+              <button id="openSettings" class="settings-button" type="button">설정</button>
+            </div>
+          </aside>
         <div class="map-viewport">
           <canvas id="map" width="1200" height="600" tabindex="0" aria-label="좌표와 방향선 지도" aria-describedby="mapHint"></canvas>
           <dl class="map-readouts" aria-label="항해 정보">
-            <div><dt>속도 <span>좌표/초</span></dt><dd id="speed">—</dd></div>
+            <div><dt>속도 <span id="speedUnitLabel">좌표/분</span></dt><dd id="speed">—</dd></div>
             <div><dt>시점 방위</dt><dd id="heading">—°</dd></div>
             <div><dt>실제 항로 방위</dt><dd id="course">—°</dd></div>
             <div id="estimatedLocation" role="status" hidden><dt>위치 상태</dt><dd>예상 위치</dd></div>
           </dl>
-          <button id="openSettings" class="settings-button" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">설정</button>
+        </div>
         </div>
         <p id="mapHint" class="hint">드래그하거나 방향키로 이동합니다. 마우스 휠 또는 +/− 버튼으로 확대·축소합니다.</p>
       </section>
     </main>
   </div>
 
-  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
-    <div class="dialog-heading">
-      <h2 id="settingsTitle">설정</h2>
-      <form method="dialog">
-        <button id="closeSettings" type="submit" autofocus>닫기</button>
-      </form>
-    </div>
+              <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+                <div class="dialog-heading"><h2 id="settingsTitle">설정</h2><button id="closeSettingsTop" type="button">닫기</button></div>
     <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="설정 항목">
-      <button id="recognitionTab" type="button" role="tab" aria-selected="true" aria-controls="recognitionPanel">인식 상태</button>
+      <button id="generalTab" type="button" role="tab" aria-selected="true" aria-controls="generalPanel">기본</button>
+      <button id="recognitionTab" type="button" role="tab" aria-selected="false" aria-controls="recognitionPanel" tabindex="-1">인식 상태</button>
       <button id="captureTab" type="button" role="tab" aria-selected="false" aria-controls="capturePanel" tabindex="-1">화면 및 영역</button>
     </div>
     <div id="settingsBody" class="dialog-body">
-      <form id="recognitionPanel" class="settings-overview" role="tabpanel" aria-labelledby="recognitionTab">
+      <form id="recognitionPanel" class="settings-overview" role="tabpanel" aria-labelledby="recognitionTab" hidden>
         <section aria-labelledby="recognitionTitle">
           <div class="section-title">
             <h3 id="recognitionTitle">인식 상태</h3>
@@ -56,6 +129,7 @@
           <div class="readouts">
             <div><small>좌표 X / Y</small><strong id="position">— / —</strong></div>
             <div><small>시점 방위</small><strong id="previewHeading">—°</strong></div>
+            <div><small>항해 일수</small><strong id="sailingDay">—</strong></div>
           </div>
           <div class="toolbar">
             <button id="once" class="primary" type="button">한 번 인식</button>
@@ -86,7 +160,6 @@
               </select>
             </label>
             <p id="bearingStepHint" class="hint">작은 단위로 표시할수록 화면과 좌표의 작은 변화가 드러나 방위 오차가 커 보일 수 있습니다.</p>
-            <label>방향선 길이 (지도 단위)<input id="lineLength" type="number" required step="any" value="1200" min="0" max="16384"></label>
           </div>
         </section>
         <section aria-labelledby="mapSettingsTitle">
@@ -123,6 +196,43 @@
           </div>
         </section>
       </form>
+      <form id="generalPanel" class="general-panel" role="tabpanel" aria-labelledby="generalTab">
+        <div class="settings">
+          <label>접기 화살표 위치
+            <select id="sidebarArrowPosition">
+              <option value="top">상단</option>
+              <option value="center">중앙</option>
+              <option value="bottom">하단</option>
+            </select>
+          </label>
+          <label>속도 표기
+            <select id="speedUnit">
+              <option value="coordinatesPerMinute">분당 좌표</option>
+              <option value="knot">knot</option>
+            </select>
+          </label>
+          <label>방향선 길이 방식
+            <select id="lineLengthMode">
+              <option value="fixed">고정형</option>
+              <option value="days">가변형</option>
+            </select>
+          </label>
+          <label id="fixedLineLength">방향선 길이 (지도 단위)<input id="lineLength" type="number" required step="any" value="16384" min="0" max="16384"></label>
+          <label id="sailingLineLength" hidden>예상 항해 일수<input id="lineDays" type="number" required step="any" value="1" min="0.1" aria-describedby="lineDaysHint"></label>
+          <p id="lineDaysHint" class="hint" hidden>항해 1일은 실제 60초로 계산합니다. 평균 속도가 아직 없거나 배가 정지해 있으면 방향선을 숨깁니다.</p>
+          <label class="check-setting"><input id="showDayArrows" type="checkbox" checked>1일 간격 화살표</label>
+          <label class="check-setting"><input id="adjustSailingTime" type="checkbox" aria-describedby="sailingTimeHint">항해시간 보정</label>
+          <p id="sailingTimeHint" class="hint">항해 일수가 바뀌는 것을 감지한 뒤, 다음 날까지 남은 시간에 맞춰 첫 화살표를 표시합니다. 이후 간격은 1일입니다.</p>
+          <label>항해경로 날짜 표기
+            <select id="routeDayInterval" aria-describedby="routeDayHint">
+              <option value="1">1일마다</option>
+              <option value="5" selected>5일마다</option>
+              <option value="0">표기 안 함</option>
+            </select>
+          </label>
+          <p id="routeDayHint" class="hint">지나온 경로에는 날짜 표기 설정과 관계없이 하루마다 점을 찍습니다.</p>
+        </div>
+      </form>
       <form id="capturePanel" class="capture-panel" role="tabpanel" aria-labelledby="captureTab" hidden>
         <div class="screen-connection" role="group" aria-label="화면 연결" data-share-controls></div>
         <div class="toolbar">
@@ -131,6 +241,10 @@
         </div>
         <p id="screenMessage" class="hint" role="status">미리보려면 게임 화면을 공유하거나 데모 또는 스크린샷을 여세요.</p>
         <canvas id="capture" width="960" height="540" aria-label="공유 화면과 인식 영역"></canvas>
+        <div id="compassScreen" hidden>
+          <p class="hint">나침반 공유 화면</p>
+          <canvas id="compassCapture" width="960" height="540" aria-label="나침반 공유 화면과 인식 영역"></canvas>
+        </div>
         <div class="toolbar">
           <button id="autoRegions" type="button" disabled>게임 기본 영역</button>
           <button id="coordRegion" type="button">좌표 영역 지정</button>
@@ -148,9 +262,19 @@
         <button id="cancelSettings" type="button">변경사항 취소</button>
         <button id="saveSettings" class="primary" type="button">변경사항 저장</button>
       </div>
+      <button id="closeSettings" type="button">닫기</button>
       <button id="resetSettings" type="reset" form="recognitionPanel">설정 초기화</button>
     </div>
+              </dialog>
+
+  <dialog id="routeHeadingsDialog" aria-labelledby="routeHeadingsTitle">
+    <div class="dialog-heading">
+      <h2 id="routeHeadingsTitle">선회 방위</h2>
+      <form method="dialog"><button type="submit" autofocus>닫기</button></form>
+    </div>
+    <div id="routeHeadingList" class="dialog-body"></div>
   </dialog>
+
   <template id="sharingControls">
     <div class="section-title">
       <h4>화면 연결</h4>
@@ -158,10 +282,12 @@
     </div>
     <div class="toolbar">
       <button class="primary" type="button" data-share-start>게임 화면 공유</button>
+      <button type="button" data-compass-share hidden>나침반 화면 추가</button>
       <button type="button" data-share-stop hidden>공유 종료</button>
     </div>
   </template>
   <video id="video" autoplay muted playsinline hidden></video>
+  <video id="compassVideo" autoplay muted playsinline hidden></video>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

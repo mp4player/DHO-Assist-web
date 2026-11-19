@@ -1,13 +1,21 @@
-import {directionVector} from './vision.js';
+import {directionVector, wrappedDeltaX} from './vision.js';
 
 const minZoom = 0.5;
-const maxZoom = 8;
+const maxZoom = 32;
 const zoomStep = 1.25;
+const positionRadius = 6;
+const routeColor = '#b9a4ff';
+const plannedRouteColor = '#529dff';
 const wrap = (value, period) => ((value % period) + period) % period;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
   const context = canvas.getContext('2d');
+  const background = document.createElement('canvas');
+  const backgroundContext = background.getContext('2d', {alpha: false});
+  let backgroundInputs = [];
+  let drawnRoutePoints = 0;
+  const routeDays = [];
   let {width, height} = canvas;
   let aspect = 2;
   let zoom = 1;
@@ -16,6 +24,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
   let drag = null;
   let dirty = true;
   let lastDraw = [];
+  let plannedRoute = null;
 
   function moveTo(x, y) {
     const tileHeight = height * zoom;
@@ -41,7 +50,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
   viewportObserver.observe(canvas);
 
   function updateZoomControls() {
-    zoomLevel.textContent = `${Math.round(zoom * 100)}%`;
+    zoomLevel.value = Math.round(zoom * 100);
     zoomIn.disabled = zoom >= maxZoom;
     zoomOut.disabled = zoom <= minZoom;
   }
@@ -55,6 +64,31 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     updateZoomControls();
   }
 
+  function showPlannedRoute(legs, settings, fit = true) {
+    plannedRoute = legs;
+    dirty = true;
+    if (!fit) return;
+    const points = legs?.flatMap(leg => leg.points);
+    if (!points?.length) return;
+    const {worldWidth, worldHeight, originX, originY} = settings;
+    let x = points[0].x;
+    let minX = x, maxX = x, minY = points[0].y, maxY = minY;
+    for (let i = 1; i < points.length; i++) {
+      x += wrappedDeltaX(points[i - 1], points[i], worldWidth);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, points[i].y);
+      maxY = Math.max(maxY, points[i].y);
+    }
+    const fitX = width * .86 * worldWidth / (Math.max(1, maxX - minX) * height * aspect);
+    const fitY = .8 * worldHeight / Math.max(1, maxY - minY);
+    zoom = clamp(Math.min(zoom, fitX, fitY), minZoom, maxZoom);
+    const tileHeight = height * zoom;
+    moveTo(width / 2 - ((minX + maxX) / 2 - originX) / worldWidth * tileHeight * aspect,
+      height / 2 - ((minY + maxY) / 2 - originY) / worldHeight * tileHeight);
+    updateZoomControls();
+  }
+
   function point(event) {
     const bounds = canvas.getBoundingClientRect();
     return {
@@ -65,6 +99,10 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
 
   zoomIn.onclick = () => zoomTo(zoom * zoomStep);
   zoomOut.onclick = () => zoomTo(zoom / zoomStep);
+  zoomLevel.onchange = () => {
+    if (zoomLevel.value !== '' && Number.isFinite(zoomLevel.valueAsNumber)) zoomTo(zoomLevel.valueAsNumber / 100);
+    updateZoomControls();
+  };
   reset.onclick = () => {
     zoom = 1;
     moveTo((width - height * aspect) / 2, 0);
@@ -112,7 +150,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
   };
   updateZoomControls();
 
-  function drawGrid(x, tileWidth, tileHeight, worldWidth, originX) {
+  function drawGrid(context, x, tileWidth, tileHeight, worldWidth, originX) {
     context.strokeStyle = '#1d3a48';
     context.lineWidth = 1;
     context.fillStyle = '#5a7d90';
@@ -131,7 +169,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     context.fillText('좌표 격자 · 지도 이미지를 불러오세요', x + 18, top + tileHeight - 20);
   }
 
-  function drawDirection(x, y, tileWidth, dx, dy, color, dash) {
+  function drawDirection(x, y, tileWidth, dx, dy, color, dash, dayStep, firstDayFraction) {
     if (!dx && !dy) return;
     const first = Math.ceil((-x - Math.max(0, dx) - 2) / tileWidth);
     const last = Math.floor((width - x - Math.min(0, dx) + 2) / tileWidth);
@@ -146,6 +184,30 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     }
     context.stroke();
     context.setLineDash([]);
+
+    if (!(dayStep > 0 && dayStep * firstDayFraction <= 1 + Number.EPSILON)) return;
+    const length = Math.hypot(dx, dy);
+    const unitX = dx / length;
+    const unitY = dy / length;
+    // Coalesce marks whose tips would fall within the same screen pixel.
+    const stride = Math.max(1, Math.ceil(1 / (length * dayStep)));
+    const firstDay = dayStep * firstDayFraction;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    for (let copy = first; copy <= last; copy++) {
+      const start = x + copy * tileWidth;
+      for (let t = firstDay; t <= 1 + Number.EPSILON; t += dayStep * stride) {
+        const tipX = start + dx * t;
+        const tipY = y + dy * t;
+        if (tipX < -8 || tipX > width + 8 || tipY < -8 || tipY > height + 8) continue;
+        const tailX = tipX - unitX * 6;
+        const tailY = tipY - unitY * 6;
+        context.moveTo(tailX - unitY * 3, tailY + unitX * 3);
+        context.lineTo(tipX, tipY);
+        context.lineTo(tailX + unitY * 3, tailY - unitX * 3);
+      }
+    }
+    context.stroke();
   }
 
   function drawPosition(x, y, tileWidth, position, estimated) {
@@ -158,7 +220,7 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
       const marker = x + copy * tileWidth;
       context.fillStyle = estimated ? '#ffca80' : '#80efd0';
       context.beginPath();
-      context.arc(marker, y, 6, 0, Math.PI * 2);
+      context.arc(marker, y, positionRadius, 0, Math.PI * 2);
       context.fill();
       context.strokeStyle = estimated ? '#ffca8066' : '#80efd066';
       context.lineWidth = 1;
@@ -170,53 +232,202 @@ export function createMapView(canvas, {zoomIn, zoomOut, reset, zoomLevel}) {
     }
   }
 
-  function draw(image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength, estimated = false) {
+  function traceRoute(points, firstPoint, context, tileWidth, worldWidth, xFor, yFor) {
+    const scaleX = tileWidth / worldWidth;
+    context.beginPath();
+    for (let i = Math.max(1, firstPoint); i < points.length; i++) {
+      const point = points[i];
+      if (point.start) continue;
+      const previous = points[i - 1];
+      const y = yFor(previous);
+      const nextY = yFor(point);
+      if (Math.max(y, nextY) < 0 || Math.min(y, nextY) > height) continue;
+      const x = xFor(previous);
+      const dx = wrappedDeltaX(previous, point, worldWidth) * scaleX;
+      const first = Math.ceil((-x - Math.max(0, dx) - 2) / tileWidth);
+      const last = Math.floor((width - x - Math.min(0, dx) + 2) / tileWidth);
+      for (let copy = first; copy <= last; copy++) {
+        const start = x + copy * tileWidth;
+        context.moveTo(start, y);
+        context.lineTo(start + dx, nextY);
+      }
+    }
+  }
+
+  function drawPlannedRoute(tileWidth, worldWidth, xFor, yFor) {
+    const transferColor = '#ffb857';
+    for (const leg of plannedRoute) {
+      const sea = leg.mode === '해상';
+      context.lineWidth = 6;
+      context.strokeStyle = '#102235';
+      context.setLineDash(sea ? [] : [7, 5]);
+      traceRoute(leg.points, 1, context, tileWidth, worldWidth, xFor, yFor);
+      context.stroke();
+      context.lineWidth = 3;
+      context.strokeStyle = sea ? plannedRouteColor : transferColor;
+      context.stroke();
+    }
+    context.setLineDash([]);
+    context.font = 'bold 11px system-ui';
+    context.textAlign = 'center';
+    context.lineWidth = 3;
+    context.strokeStyle = '#102235';
+    context.fillStyle = '#e0edff';
+    let lastLabel;
+    for (const leg of plannedRoute) {
+      if (!leg.headings) continue;
+      for (const [i, heading] of leg.headings.entries()) {
+        const point = leg.points[i];
+        const x = xFor(point), y = yFor(point);
+        if (y < 18 || y > height - 4) continue;
+        const first = Math.ceil((16 - x) / tileWidth);
+        const last = Math.floor((width - 16 - x) / tileWidth);
+        for (let copy = first; copy <= last; copy++) {
+          const center = x + copy * tileWidth;
+          if (lastLabel && Math.abs(center - lastLabel.x) < 44 && Math.abs(y - lastLabel.y) < 18) continue;
+          const label = `${heading}°`;
+          context.beginPath();
+          context.arc(center, y, 2.5, 0, Math.PI * 2);
+          context.fill();
+          context.strokeText(label, center, y - 8);
+          context.fillText(label, center, y - 8);
+          lastLabel = {x: center, y};
+        }
+      }
+    }
+    context.textAlign = 'start';
+    const firstLeg = plannedRoute[0], lastLeg = plannedRoute.at(-1);
+    const endpoints = [
+      [firstLeg.points[0], firstLeg.mode],
+      [lastLeg.points.at(-1), lastLeg.mode],
+    ];
+    for (const [point, mode] of endpoints) {
+      const x = xFor(point);
+      const y = yFor(point);
+      const first = Math.ceil((-x - 6) / tileWidth);
+      const last = Math.floor((width - x + 6) / tileWidth);
+      context.fillStyle = mode === '해상' ? plannedRouteColor : transferColor;
+      context.strokeStyle = '#102235';
+      context.lineWidth = 2;
+      for (let copy = first; copy <= last; copy++) {
+        context.beginPath();
+        context.arc(x + copy * tileWidth, y, 5, 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+      }
+    }
+  }
+
+  function drawRouteDays(points, dayInterval, tileWidth, xFor, yFor) {
+    context.font = 'bold 8px monospace';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    for (const point of points) {
+      const labeled = dayInterval > 0 && point.day % dayInterval === 0;
+      const radius = labeled ? positionRadius : 2;
+      const y = yFor(point);
+      if (y < -radius || y > height + radius) continue;
+      const x = xFor(point);
+      const first = Math.ceil((-x - radius) / tileWidth);
+      const last = Math.floor((width - x + radius) / tileWidth);
+      for (let copy = first; copy <= last; copy++) {
+        const centerX = x + copy * tileWidth;
+        context.fillStyle = routeColor;
+        context.beginPath();
+        context.arc(centerX, y, radius, 0, Math.PI * 2);
+        context.fill();
+        if (labeled) {
+          context.fillStyle = '#101625';
+          context.fillText(String(point.day), centerX, y, 10);
+        }
+      }
+    }
+    context.textAlign = 'start';
+    context.textBaseline = 'alphabetic';
+  }
+
+  function draw(image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength, estimated,
+    dayDistance, firstDayFraction, routePoints, routeDayInterval) {
     const imageAspect = image ? image.naturalWidth / image.naturalHeight : 2;
     if (imageAspect !== aspect) resize(width, height, imageAspect);
-    const inputs = [image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength, estimated];
+    const inputs = [image, position, angle, course, worldWidth, worldHeight, originX, originY, lineLength, estimated,
+      dayDistance, firstDayFraction, routePoints, routePoints.length, routeDayInterval];
     if (!dirty && inputs.every((input, index) => Object.is(input, lastDraw[index]))) return;
     dirty = false;
     lastDraw = inputs;
 
     const tileHeight = height * zoom;
     const tileWidth = tileHeight * aspect;
-    context.fillStyle = '#091c27';
-    context.fillRect(0, 0, width, height);
-    for (let x = left; x < width; x += tileWidth) {
-      if (image) {
-        const start = Math.round(x);
-        const end = Math.round(x + tileWidth);
-        context.drawImage(image, start, top, end - start, tileHeight);
-      } else {
-        drawGrid(x, tileWidth, tileHeight, worldWidth, originX);
+    const xFor = point => left + wrap(point.x - originX, worldWidth) / worldWidth * tileWidth;
+    const yFor = point => top + (point.y - originY) / worldHeight * tileHeight;
+    const backdrop = [image, width, height, left, top, tileWidth, tileHeight,
+      worldWidth, worldHeight, originX, originY, routePoints];
+    if (routePoints.length < drawnRoutePoints || !backdrop.every((value, index) => value === backgroundInputs[index])) {
+      backgroundInputs = backdrop;
+      if (background.width !== width) background.width = width;
+      if (background.height !== height) background.height = height;
+      backgroundContext.fillStyle = '#091c27';
+      backgroundContext.fillRect(0, 0, width, height);
+      for (let x = left; x < width; x += tileWidth) {
+        if (image) {
+          const start = Math.round(x);
+          const end = Math.round(x + tileWidth);
+          backgroundContext.drawImage(image, start, top, end - start, tileHeight);
+        } else {
+          drawGrid(backgroundContext, x, tileWidth, tileHeight, worldWidth, originX);
+        }
       }
+      drawnRoutePoints = 0;
+      routeDays.length = 0;
     }
-    if (!position || !(worldWidth > 0 && worldHeight > 0)) return;
-
-    const x = left + wrap(position.x - originX, worldWidth) / worldWidth * tileWidth;
-    const y = top + (position.y - originY) / worldHeight * tileHeight;
+    if (worldWidth > 0 && worldHeight > 0 && routePoints.length > drawnRoutePoints) {
+      backgroundContext.save();
+      backgroundContext.beginPath();
+      backgroundContext.rect(0, top, width, tileHeight);
+      backgroundContext.clip();
+      for (let i = drawnRoutePoints; i < routePoints.length; i++) {
+        if (routePoints[i].day !== null) routeDays.push(routePoints[i]);
+      }
+      backgroundContext.strokeStyle = routeColor;
+      backgroundContext.lineWidth = 1.5;
+      traceRoute(routePoints, drawnRoutePoints, backgroundContext, tileWidth, worldWidth, xFor, yFor);
+      backgroundContext.stroke();
+      backgroundContext.restore();
+      drawnRoutePoints = routePoints.length;
+    }
+    context.drawImage(background, 0, 0);
+    if (!(worldWidth > 0 && worldHeight > 0)) return;
     context.save();
     context.beginPath();
     context.rect(0, top, width, tileHeight);
     context.clip();
-    if (Number.isFinite(lineLength)) {
-      const bearings = [
-        {angle: course, color: '#ffca80', dash: []},
-        {angle: estimated ? null : angle, color: '#80efd0', dash: [8, 6]},
-      ];
-      for (const bearing of bearings) {
-        if (bearing.angle === null) continue;
-        const vector = directionVector(bearing.angle, lineLength);
-        // Limit the direction line to one horizontal circuit for narrow custom worlds.
-        const fraction = Math.abs(vector.x) > worldWidth ? worldWidth / Math.abs(vector.x) : 1;
-        const dx = vector.x * fraction / worldWidth * tileWidth;
-        const dy = vector.y * fraction / worldHeight * tileHeight;
-        drawDirection(x, y, tileWidth, dx, dy, bearing.color, bearing.dash);
-      }
+    if (plannedRoute?.length && worldWidth === 16384 && worldHeight === 8192) {
+      drawPlannedRoute(tileWidth, worldWidth, xFor, yFor);
     }
-    drawPosition(x, y, tileWidth, position, estimated);
+    if (position) {
+      const x = xFor(position);
+      const y = yFor(position);
+      if (Number.isFinite(lineLength)) {
+        const bearings = [
+          {angle: course, color: '#ffca80', dash: []},
+          {angle: estimated ? null : angle, color: '#80efd0', dash: [8, 6]},
+        ];
+        for (const bearing of bearings) {
+          if (bearing.angle === null) continue;
+          const vector = directionVector(bearing.angle, lineLength);
+          // Limit the direction line to one horizontal circuit for narrow custom worlds.
+          const fraction = Math.abs(vector.x) > worldWidth ? worldWidth / Math.abs(vector.x) : 1;
+          const dx = vector.x * fraction / worldWidth * tileWidth;
+          const dy = vector.y * fraction / worldHeight * tileHeight;
+          const dayStep = dayDistance / (lineLength * fraction);
+          drawDirection(x, y, tileWidth, dx, dy, bearing.color, bearing.dash, dayStep, firstDayFraction);
+        }
+      }
+      drawPosition(x, y, tileWidth, position, estimated);
+    }
+    drawRouteDays(routeDays, routeDayInterval, tileWidth, xFor, yFor);
     context.restore();
   }
 
-  return {draw};
+  return {draw, showPlannedRoute};
 }

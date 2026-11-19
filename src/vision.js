@@ -138,14 +138,17 @@ const dayGlyphs = [
   0b111011000001011110,
 ];
 
-export function hasSailingDay({data, width}, left = 0, top = 0) {
+export function readSailingDay({data, width}, left = 0, top = 0) {
   function bright(x, y) {
     const pixel = ((top + y) * width + left + x) * 4;
     return data[pixel] + data[pixel + 1] + data[pixel + 2] > 384;
   }
-  let count = 3;
-  if (!bright(10, 4) && !bright(10, 10)) count = 2;
-  else if (!bright(2, 4) && !bright(2, 10)) count = 1;
+  const columnHasInk = x => {
+    for (let y = 0; y < 11; y += 2) if (bright(x, y)) return true;
+    return false;
+  };
+  const count = columnHasInk(2) ? 3 : columnHasInk(10) ? 1 : 2;
+  let day = 0;
   for (let digit = 0; digit < count; digit++) {
     let glyph = 0;
     const start = (3 - count) * 4 + digit * 8;
@@ -154,18 +157,34 @@ export function hasSailingDay({data, width}, left = 0, top = 0) {
         glyph = (glyph << 1) | Number(bright(start + x, y));
       }
     }
-    if (!dayGlyphs.includes(glyph)) return false;
+    const value = dayGlyphs.indexOf(glyph);
+    if (value < 0) return null;
+    day = day * 10 + value;
   }
-  return true;
+  return day;
 }
 
 export function findSailingDay(image) {
   for (let y = 0; y <= image.height - 11; y++) {
     for (let x = 0; x <= image.width - 21; x++) {
-      if (hasSailingDay(image, x, y)) return {x, y};
+      const day = readSailingDay(image, x, y);
+      if (day !== null) return {x, y, day};
     }
   }
   return null;
+}
+
+export function updateSailingClock(previous, day, time, maxGap) {
+  const continuous = previous && time - previous.time <= maxGap;
+  let boundary = null;
+  if (continuous && day === previous.day) boundary = previous.boundary;
+  if (continuous && day === (previous.day + 1) % 1000) boundary = (previous.time + time) / 2;
+  return {day, time, boundary};
+}
+
+export function nextSailingDayFraction(boundary, time, dayMs) {
+  if (boundary == null || time < boundary) return 1;
+  return Math.max(0, 1 - (time - boundary) / dayMs);
 }
 
 export function estimatePosition(fix, elapsed, worldWidth, worldHeight) {
@@ -197,8 +216,8 @@ export function shouldEstimatePosition(attempts, windowMs) {
   return failures >= 2 && failures * 2 >= total;
 }
 
-function wrappedDeltaX(previous, current, worldWidth) {
-  const rawX = current.x - previous.x;
+export function wrappedDeltaX(previous, current, worldWidth) {
+  const rawX = (current.x - previous.x) % worldWidth;
   return Math.abs(rawX) > worldWidth / 2 ? rawX - Math.sign(rawX) * worldWidth : rawX;
 }
 

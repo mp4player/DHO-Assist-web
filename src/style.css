@@ -36,6 +36,9 @@ main { display: flex; flex: 1; min-width: 0; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
 .map-controls { margin: 0; }
 #mapShareMessage { margin: 0 0 8px; }
+#plannedRouteBar { margin: 0 0 10px; font-size: 13px; color: #a6d4ff; }
+#plannedRouteBar[hidden], #routeStatus:empty { display: none; }
+#plannedRouteEstimate { flex-basis: 100%; color: #a5becc; }
 .map-controls output { min-width: 5ch; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 
 button, .button, select, input {
@@ -56,8 +59,8 @@ button:disabled { opacity: .45; cursor: default; }
 .primary { border-color: #80dfc4; color: #09251e; background: #80dfc4; font-weight: 700; }
 
 canvas { display: block; max-width: 100%; height: auto; }
-#capture { width: 100%; border-radius: 8px; background: #080f17; touch-action: none; }
-#capture.selecting { cursor: crosshair; }
+#capture, #compassCapture { width: 100%; border-radius: 8px; background: #080f17; touch-action: none; }
+#capture.selecting, #compassCapture.selecting { cursor: crosshair; }
 .crops { display: flex; gap: 18px; margin-top: 16px; align-items: flex-start; }
 .crops > div { min-width: 0; }
 .crops canvas { margin-top: 8px; border: 1px solid #354b5a; background: #070d13; }
@@ -73,6 +76,38 @@ small { font-size: 11px; color: #a5becc; }
 }
 
 .map-viewport { position: relative; flex: 1; min-height: 140px; }
+.map-workspace { display: flex; flex: 1; min-height: 140px; }
+.map-sidebar { position: relative; flex: 0 0 288px; min-width: 0; }
+.map-sidebar:has(.sidebar-body[hidden]) { flex-basis: 0; }
+.sidebar-toggle {
+  --proximity: 0;
+  position: absolute;
+  z-index: 3;
+  left: 100%;
+  top: 0;
+  width: 28px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 28px 28px 0;
+  color: rgb(128 239 208 / calc(.4 + var(--proximity) * .6));
+  background: rgb(16 37 50 / calc(var(--proximity) * .94));
+  font-size: 24px;
+  transition: background-color 240ms ease, color 240ms ease;
+}
+.map-sidebar[data-arrow-position="center"] .sidebar-toggle { top: calc(50% - 28px); }
+.map-sidebar[data-arrow-position="bottom"] .sidebar-toggle { top: calc(100% - 56px); }
+.sidebar-toggle:focus-visible { background: #102532ee; }
+.sidebar-body { position: absolute; inset: 0 0 0 0; overflow-y: auto; padding: 0 8px 12px 0; overscroll-behavior: contain; }
+.sidebar-zoom { padding: 0 30px 12px 0; border-bottom: 1px solid #2b3c4a; }
+.zoom-inputs { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.zoom-inputs label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.zoom-inputs input { width: 86px; padding: 7px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.zoom-inputs button { padding: 7px 10px; }
+.route-panel > summary { padding: 13px 4px; cursor: pointer; font-size: 14px; font-weight: 700; }
+.route-settings { padding: 0 4px 8px; }
+.route-settings .settings { margin-top: 0; }
+.route-settings .hint { font-size: 12px; }
 #map {
   position: absolute;
   inset: 0;
@@ -113,20 +148,8 @@ small { font-size: 11px; color: #a5becc; }
 #heading { color: #80efd0; }
 #course { color: #ffca80; }
 
-.settings-button {
-  position: absolute;
-  z-index: 1;
-  left: max(16px, env(safe-area-inset-left));
-  bottom: max(16px, env(safe-area-inset-bottom));
-  min-width: 76px;
-  min-height: 42px;
-  border-color: #527484;
-  box-shadow: 0 4px 16px #0006;
-  font-weight: 700;
-}
-
-#settingsDialog {
-  width: min(1040px, calc(100% - 24px));
+#settingsDialog, #routeHeadingsDialog {
+  width: min(var(--dialog-width, 1040px), calc(100% - 24px));
   max-width: none;
   max-height: calc(100dvh - 24px);
   padding: 0;
@@ -136,8 +159,48 @@ small { font-size: 11px; color: #a5becc; }
   background: #101e29;
   box-shadow: 0 12px 48px #0008;
 }
-#settingsDialog[open] { display: flex; flex-direction: column; }
-#settingsDialog::backdrop { background: #050b13b8; }
+#routeHeadingsDialog { --dialog-width: 500px; }
+#routeHeadingList h3 { margin: 0; font-size: 14px; }
+#routeHeadingList ol { margin: 8px 0 18px; padding-left: 26px; line-height: 1.65; font-size: 13px; }
+#routeHeadingList ol:last-child { margin-bottom: 0; }
+.place-picker { position: relative; min-width: 0; }
+.settings .place-picker input { padding-right: 38px; }
+.place-picker-toggle {
+  position: absolute;
+  inset: auto 1px 1px auto;
+  width: 34px;
+  height: calc(100% - 24px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.place-picker-menu {
+  position: absolute;
+  z-index: 2;
+  inset: 100% 0 auto;
+  max-height: min(230px, 40dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #101e29;
+  border: 1px solid #527484;
+  border-radius: 7px;
+  box-shadow: 0 5px 12px #0008;
+  font-size: 13px;
+}
+.place-picker-group, .place-picker-empty { padding: 6px 9px; color: #a5becc; }
+.place-picker-group { font-size: 11px; }
+.place-picker-menu [role="option"] { padding: 7px 9px; cursor: pointer; }
+.place-picker-menu [role="option"]:hover, .place-picker-menu [aria-selected="true"] { background: #274759; }
+#routeSeason { color: #80efd0; }
+#routeTransferOptions { margin-top: 14px; font-size: 13px; }
+#routeTransferOptions label { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
+#routeTransferOptions input { margin: 0; accent-color: #80efd0; }
+#routeTransferOptions fieldset { min-width: 0; margin: 6px 0; padding: 5px 10px; border: 1px solid #344d60; border-radius: 7px; }
+#routeTransferOptions fieldset:disabled { color: #8ca5b4; }
+#routeTransferOptions legend { font-size: 12px; }
+#routeStatus { font-size: 13px; }
+#settingsDialog[open], #settingsDialog[open], #routeHeadingsDialog[open] { display: flex; flex-direction: column; }
+#settingsDialog::backdrop, #settingsDialog::backdrop, #routeHeadingsDialog::backdrop { background: #050b13b8; }
 .dialog-heading {
   display: flex;
   align-items: center;
@@ -185,6 +248,11 @@ small { font-size: 11px; color: #a5becc; }
 .settings { display: grid; gap: 12px; margin-top: 12px; }
 .settings label { color: #a5becc; font-size: 12px; }
 .settings input, .settings select { display: block; width: 100%; margin-top: 6px; }
+.general-panel { max-width: 420px; margin: auto; }
+.general-panel .settings { margin-top: 0; }
+.settings .check-setting { display: flex; align-items: center; gap: 8px; }
+.settings .check-setting input { width: auto; margin: 0; accent-color: #80efd0; }
+.settings .check-setting:has(input:disabled) { opacity: .6; }
 
 @media (max-width: 760px) {
   #app { padding: 8px; }
@@ -195,4 +263,12 @@ small { font-size: 11px; color: #a5becc; }
   .map-readouts > div { padding: 0 7px; }
   .map-readouts dt { font-size: 11px; }
   .map-readouts dd { font-size: 16px; }
+  .map-workspace { position: relative; }
+  .map-sidebar { flex-basis: 0; z-index: 2; }
+  .sidebar-body { width: min(288px, calc(100vw - 60px)); padding: 10px; top: 0; border: 1px solid #435f70; border-radius: 8px; background: #101e29; box-shadow: 4px 0 16px #0006; }
+  .map-sidebar:has(.sidebar-body:not([hidden])) .sidebar-toggle { left: min(288px, calc(100vw - 60px)); }
 }
+
+.sidebar-body:not([hidden]) { display: flex; flex-direction: column; }
+.sidebar-body > * { flex-shrink: 0; }
+.settings-button { margin-top: auto; align-self: flex-start; position: sticky; bottom: 0; }
